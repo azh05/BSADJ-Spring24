@@ -1,0 +1,292 @@
+---
+title: "BSAGraphs"
+output: html_document
+date: "2024-05-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggrepel)
+```
+
+```{r}
+df <- read_csv("./data/combinedstatshot.csv")
+df <- df |> select(!c("games_started", "pf_per_g"))
+colnames(df)
+```
+
+## Plot 2pt attempts to 3pt attempts
+
+```{r echo=FALSE}
+plot1 <- df |> ggplot(aes(x = fg3_per_g, y= fg2a_per_g)) +
+  geom_point()
+
+plot1
+```
+
+## From success script
+
+``` {r}
+
+path <- "~/BruinSports/data/draftdata.csv"
+df_career_stats <- read_csv(path)
+  
+drop_cols <- c('team_id', 'skip', 'mp', 'pts', 'trb', 'ast')
+
+df_career_stats <- df_career_stats |> select(!drop_cols)
+df_lot_picks <- df_career_stats |> filter(pick_overall < 15)
+
+colnames(df_career_stats)
+
+# plotting the distribution of points + rebounds + asts (PRA) per game
+df_lot_picks <- df_lot_picks |> mutate(
+  pra_per_g = pts_per_g + trb_per_g + ast_per_g,
+  pick_overall = factor(pick_overall)
+)
+
+# Group by draft position, and getting the mean
+draft_means <- df_lot_picks |> group_by(pick_overall) |>
+  summarize(avg_mpg = mean(mp_per_g),
+            avg_ppg = mean(pts_per_g),
+            avg_trbpg = mean(trb_per_g),
+            avg_apg = mean(ast_per_g),
+            avg_prapg = mean(pra_per_g))
+
+print(draft_means, n = 14)
+
+df_lot_picks |> ggplot(aes(x = pick_overall, y = pra_per_g)) +
+  geom_boxplot() + 
+  labs(x = "Draft Pick", y = "Points-Rebounds-Assists Per Game")
+
+```
+
+## Plotting the players in the top 25% in PRA per game
+```{r}
+df2 <- left_join(df, df_lot_picks, by = c("player"), suffix = c("_college", "_nba"))
+df2 <- df2 |> 
+  separate_wider_delim(dunk_tot, delim = "-", names = c("dunk_made", "dunk_attempts"))
+
+df2 <- df2 |>
+  separate_wider_delim(rim_tot, delim = "-", names = c("rim_made", "rim_attempts"))
+
+df2 <- df2 |>
+  separate_wider_delim(other2pt_tot, delim = "-", names = c("other2pt_made", "other2pt_attempts"))
+
+df2 <-df2 |>
+  mutate(across(c(dunk_made, dunk_attempts, rim_made, rim_attempts, other2pt_made, other2pt_attempts), as.numeric))
+```
+
+## defining bust metric
+``` {r}
+df2 <- df2 |> mutate(
+  vorp_per_g = vorp / g
+)
+
+df_top_players <- df2 |> 
+  group_by(pick_overall) |>
+  summarize(across(c(pts_per_g_nba, trb_per_g_nba, ast_per_g_nba, pra_per_g, vorp_per_g), function(x) quantile(x, probs = 0.7)))
+
+df_bottom_players <- df2 |> 
+  group_by(pick_overall) |>
+  summarize(across(c(pts_per_g_nba, trb_per_g_nba, ast_per_g_nba, pra_per_g, vorp_per_g), function(x) quantile(x, probs = 0.3)))
+
+# metric favors big men
+# make the rebound percentile higher
+
+is_not_bust <- function(pick_number, df_top_players = df_top_players, df2 = df2) {
+  ppg <- df_top_players |> pull(pts_per_g_nba)
+  apg <- df_top_players |> pull(ast_per_g_nba)
+  prapg <- df_top_players |> pull(pra_per_g)
+  
+  df_top_rb <- df2 |> 
+    group_by(pick_overall) |>
+    summarize(trb_per_g = quantile(trb_per_g_nba, probs = 0.8))
+  
+  rpg <- df_top_rb |> pull(trb_per_g)
+  
+  df_top_vorp <- df2 |> 
+    group_by(pick_overall) |>
+    summarize(vorp_per_g = median(vorp_per_g))
+  
+  vorppg <- df_top_vorp |> pull(vorp_per_g)
+  
+  df <- df2 |> filter(pick_overall == pick_number) |>
+  filter(pra_per_g >= prapg[[pick_number]] | ast_per_g_nba >= apg[[pick_number]] | trb_per_g_nba >= rpg[[pick_number]] | pts_per_g_nba >= ppg[[pick_number]]) |>
+    filter(vorp_per_g >= vorppg[[pick_number]]) 
+  
+  # must also have played at least most of their career in the nba
+  df <- df |> filter(seasons >= 4 / 5 * (2023-year))
+  
+  return(df)
+}
+
+is_bust <- function(pick_number, df_bottom_players = df_bottom_players, df2 = df2) {
+  ppg <- df_bottom_players |> pull(pts_per_g_nba)
+  
+  apg <- df_bottom_players |> pull(ast_per_g_nba)
+  prapg <- df_bottom_players |> pull(pra_per_g)
+  
+  df_bottom_rb <- df2 |> 
+    group_by(pick_overall) |>
+    summarize(trb_per_g = quantile(trb_per_g_nba, probs = 0.4))
+  
+  rpg <- df_bottom_rb |> pull(trb_per_g)
+  
+  df_top_vorp <- df2 |> 
+    group_by(pick_overall) |>
+    summarize(vorp_per_g = median(vorp_per_g))
+  
+  vorppg <- df_top_vorp |> pull(vorp_per_g)
+  
+  # playing less than half the seasons since drafted makes you a bust
+  df <- df2 |> filter(pick_overall == pick_number) |>
+  filter((pra_per_g < prapg[[pick_number]] & ast_per_g_nba < apg[[pick_number]] & trb_per_g_nba < rpg[[pick_number]] & pts_per_g_nba < ppg[[pick_number]] & vorp_per_g < vorppg[[pick_number]]) | seasons < 1 / 2 * (2023-year))
+  
+  
+  return(df)
+}
+```
+
+```{r}
+# first overall picks (not bust)
+df_pick_1 <- is_not_bust(1, df_top_players, df2)
+
+# first overall picks (bust)
+df_pick_1_bust <- is_bust(1, df_bottom_players, df2)
+
+df_pick_1
+df_pick_1_bust
+
+# second overall
+df_pick_2 <- is_not_bust(2, df_top_players, df2)
+df_pick_2_bust <- is_bust(2, df_bottom_players, df2)
+
+df_pick_2
+df_pick_2_bust
+
+# third overall
+df_pick_3 <- is_not_bust(3, df_top_players, df2)
+df_pick_3_bust <- is_bust(3, df_bottom_players, df2)
+
+df_pick_3
+df_pick_3_bust
+
+# fourth overall
+df_pick_4 <- is_not_bust(4, df_top_players, df2)
+df_pick_4_bust <- is_bust(4, df_bottom_players, df2)
+
+df_pick_4
+df_pick_4_bust
+
+# fifth overall
+df_pick_5 <- is_not_bust(5, df_top_players, df2)
+df_pick_5_bust <- is_bust(5, df_bottom_players, df2)
+
+df_pick_5
+df_pick_5_bust
+
+# sixth overall
+df_pick_6 <- is_not_bust(6, df_top_players, df2)
+df_pick_6_bust <- is_bust(6, df_bottom_players, df2)
+
+df_pick_6
+df_pick_6_bust
+
+# seventh overall
+df_pick_7 <- is_not_bust(7, df_top_players, df2)
+df_pick_7_bust <- is_bust(7, df_bottom_players, df2)
+
+df_pick_7
+df_pick_7_bust
+
+# eighth overall
+df_pick_8 <- is_not_bust(8, df_top_players, df2)
+df_pick_8_bust <- is_bust(8, df_bottom_players, df2)
+
+df_pick_8
+df_pick_8_bust
+
+# ninth overall
+df_pick_9 <- is_not_bust(9, df_top_players, df2)
+df_pick_9_bust <- is_bust(9, df_bottom_players, df2)
+
+df_pick_9
+df_pick_9_bust
+
+# tenth overall
+df_pick_10 <- is_not_bust(10, df_top_players, df2)
+df_pick_10_bust <- is_bust(10, df_bottom_players, df2)
+
+df_pick_10
+df_pick_10_bust
+
+# eleventh overall
+df_pick_11 <- is_not_bust(11, df_top_players, df2)
+df_pick_11_bust <- is_bust(11, df_bottom_players, df2)
+
+df_pick_11
+df_pick_11_bust
+
+# twelveth overall
+df_pick_12 <- is_not_bust(12, df_top_players, df2)
+df_pick_12_bust <- is_bust(12, df_bottom_players, df2)
+
+df_pick_12
+df_pick_12_bust
+
+# thirteenth overall
+df_pick_13 <- is_not_bust(13, df_top_players, df2)
+df_pick_13_bust <- is_bust(13, df_bottom_players, df2)
+
+df_pick_13
+df_pick_13_bust
+
+# fourteenth overall
+df_pick_14 <- is_not_bust(14, df_top_players, df2)
+df_pick_14_bust <- is_bust(14, df_bottom_players, df2)
+
+df_pick_14
+df_pick_14_bust
+
+```
+
+``` {r}
+# combining dataframes
+
+df_good <- bind_rows(df_pick_1, df_pick_2, df_pick_3, df_pick_4, df_pick_5, df_pick_6, df_pick_7, df_pick_8, df_pick_9,
+              df_pick_10, df_pick_11, df_pick_12, df_pick_13, df_pick_14)
+
+df_busts <- bind_rows(df_pick_1_bust, df_pick_2_bust, df_pick_3_bust, df_pick_4_bust, df_pick_5_bust, df_pick_6_bust, df_pick_7_bust, df_pick_8_bust, df_pick_9_bust, df_pick_10_bust, df_pick_11_bust, df_pick_12_bust, df_pick_13_bust, df_pick_14_bust)
+
+print(df_good, n = 20)
+df_good |> pull(player)
+
+
+df_busts
+
+df_busts |> pull(player)
+```
+
+``` {r}
+plot_good <- df_good |> ggplot(aes(x = fg2_per_g, y = fg3_per_g)) +
+  geom_point(color = "green", size = 4, alpha = 0.5)
+
+plot3 <- plot_good + geom_point(data = df_busts, color = "red", size = 4, alpha = 0.5)
+plot_combined <- plot3 + geom_point(data = df2, color = "black", size = 4, alpha = 0.2)
+
+plot_busts <- df_busts |> ggplot(aes(x = fg2_per_g, y = fg3_per_g, label = player)) +
+  geom_point(color = "red", size = 4, alpha = 0.5) +
+  geom_label_repel(size = 3) +
+  labs(title = "CBB Shot Selection for NBA Lottery Busts", x = "2PT Field Goal Makes per game", y = "3PT Field Goal Makes per game")
+
+plot_combined + labs(title = "CBB Shot Selection for NBA Lottery Picks", 
+                     x = "2PT Field Goal Makes per game", y = "3PT Field Goal Makes per game") +
+  theme_bw()
+plot_good <- plot_good + geom_label_repel(data = df_good, aes(label = player), size = 1.5, max.overlaps = 20) +
+  labs(title = "CBB Shot Selection for Good NBA Lottery Picks", x = "2PT Field Goal Makes per game", y = "3PT Field Goal Makes per game")
+plot_busts + theme_bw()
+plot_good + theme_bw()
+
+```
+
