@@ -269,24 +269,140 @@ df_busts |> pull(player)
 ```
 
 ``` {r}
-plot_good <- df_good |> ggplot(aes(x = fg2_per_g, y = fg3_per_g)) +
-  geom_point(color = "green", size = 4, alpha = 0.5)
 
-plot3 <- plot_good + geom_point(data = df_busts, color = "red", size = 4, alpha = 0.5)
-plot_combined <- plot3 + geom_point(data = df2, color = "black", size = 4, alpha = 0.2)
+plot_good <- ggplot(df_good, aes(x = fg2_per_g, y = fg3_per_g)) +
+  geom_point(color = "green", size = 4, alpha = 0.5) +
+  geom_label_repel(data = df_good, aes(label = player), size = 1.5, max.overlaps = 20) +
+  labs(title = "CBB Shot Selection for Good NBA Lottery Picks", x = "2PT Field Goal Makes per game", y = "3PT Field Goal Makes per game") +
+  theme_bw()
 
-plot_busts <- df_busts |> ggplot(aes(x = fg2_per_g, y = fg3_per_g, label = player)) +
+plot_busts <- ggplot(df_busts, aes(x = fg2_per_g, y = fg3_per_g, label = player)) +
   geom_point(color = "red", size = 4, alpha = 0.5) +
   geom_label_repel(size = 3) +
-  labs(title = "CBB Shot Selection for NBA Lottery Busts", x = "2PT Field Goal Makes per game", y = "3PT Field Goal Makes per game")
-
-plot_combined + labs(title = "CBB Shot Selection for NBA Lottery Picks", 
-                     x = "2PT Field Goal Makes per game", y = "3PT Field Goal Makes per game") +
+  labs(title = "CBB Shot Selection for NBA Lottery Busts", x = "2PT Field Goal Makes per game", y = "3PT Field Goal Makes per game") +
   theme_bw()
-plot_good <- plot_good + geom_label_repel(data = df_good, aes(label = player), size = 1.5, max.overlaps = 20) +
-  labs(title = "CBB Shot Selection for Good NBA Lottery Picks", x = "2PT Field Goal Makes per game", y = "3PT Field Goal Makes per game")
-plot_busts + theme_bw()
-plot_good + theme_bw()
 
+
+plot_combined <- ggplot(df2, aes(x = fg2_per_g, y = fg3_per_g)) +
+  geom_point(aes(color = "Average value"), size = 4, alpha = 0.2) +
+  geom_point(data = df_busts, aes(color = "Bad value"), size = 4, alpha = 0.5) +
+  geom_point(data = df_good, aes(color = "Good value"), size = 4, alpha = 0.5) +
+  labs(title = "CBB Shot Selection for NBA Lottery Picks", 
+       x = "2PT Field Goal Makes per game", y = "3PT Field Goal Makes per game") +
+  scale_color_manual(values = c("Bad value" = "red", "Good value" = "green", "Average value" = "grey")) +
+  theme_bw()
+
+plot_combined
+
+plot_busts
+plot_good
+
+```
+
+
+## Principal Component Analysis of college stats, for grouping/covariance
+
+```{r}
+library(corrr)
+library(ggcorrplot)
+library(FactoMineR)
+library(factoextra)
+```
+
+
+### Preparing Data
+```{r}
+colnames(df2)
+df3 <- column_to_rownames(df2, var = "player")
+
+df_cbb <- df3 |> select(
+  dunk_made, dunk_attempts, dunk_pct, rim_made, rim_attempts, rim_pct, rim_asted,
+  other2pt_made, other2pt_attempts, other2pt_pct, other2pt_asted, fg2_pct, fg3_per_g, fg3a_per_g, 
+ `3pt_asted`, games, ft_per_g, fta_per_g, ast_per_g_college, orb_per_g, drb_per_g,
+  stl_per_g, blk_per_g, tov_per_g, pts_per_g_college
+) |> rename(fg3_asted = `3pt_asted`) |> 
+  mutate(dunk_pct = parse_number(dunk_pct) / 100, # changing to percentages
+         rim_pct = parse_number(rim_pct) / 100,
+         rim_asted = parse_number(rim_asted) / 100,
+         other2pt_pct = parse_number(other2pt_pct) / 100,
+         other2pt_asted = parse_number(other2pt_asted) / 100,
+         fg3_asted = parse_number(fg3_asted) / 100,
+         fg3_pct_per_g = fg3_per_g / fg3a_per_g)
+
+df_cbb <- df_cbb |> 
+  mutate(fg3_pct_per_g = coalesce(fg3_pct_per_g, 0)) |>
+  relocate(fg3_pct_per_g, .after = fg3_asted)
+
+to_per_game <- function(x, games) {
+  x <- x / games
+  return(x)
+}
+
+df_cbb <- df_cbb |> # making everything per game
+  mutate(across(c(dunk_made, dunk_attempts, rim_made, rim_attempts, other2pt_made, 
+                  other2pt_attempts), function(x) to_per_game(x, games)))
+
+colSums(is.na(df_cbb))
+```
+Following this guide:
+https://www.datacamp.com/tutorial/pca-analysis-r
+
+```{r}
+df_cbb_scaled <- as_tibble(scale(df_cbb |> select(-games)))
+df_cbb_scaled
+
+# df_cbb_scaled$player <- df_cbb$player
+# df_cbb_scaled <- df_cbb_scaled |> relocate(player, .before = dunk_made)
+
+corr_matrix <- cor(df_cbb_scaled)
+ggcorrplot(corr_matrix, method = "square")
+ggcorrplot(corr_matrix, method = "square", hc.order = TRUE,
+           type = "lower")
+```
+
+```{r}
+pca <- princomp(corr_matrix)
+summary(pca)
+
+fviz_eig(pca, addlabels = TRUE, title = "Principal Components Scree Plot")
+fviz_pca_var(pca, col.var = "cos2", repel = TRUE, title = "Contributions of Variables to Components 1 and 2", gradient.cols = c("lightblue", "black"))
+fviz_cos2(pca, choice = "var", axes = 1:2)
+```
+
+Guides:
+http://www.sthda.com/english/articles/31-principal-component-methods-in-r-practical-guide/112-pca-principal-component-analysis-essentials/
+
+Kmeans Clustering:
+https://medium.com/@zullinira23/implementation-of-principal-component-analysis-pca-on-k-means-clustering-in-r-794f03ec15f
+```{r}
+df_cbb.sample <- df_cbb |> sample_frac(1, replace = FALSE)
+head(df_cbb.sample)
+
+df_cbb.pca <- PCA(df_cbb.sample |> select(-games), scale.unit = TRUE, graph = FALSE)
+
+fviz_eig(df_cbb.pca, addlabels = TRUE)
+fviz_pca_var(df_cbb.pca, col.var = "cos2", gradient.cols = c("lightblue", "black"), repel = TRUE)
+var <- get_pca_var(df_cbb.pca)
+
+fviz_cos2(df_cbb.pca, choice = "var", axes = 1:2)
+fviz_pca_ind(df_cbb.pca, repel = TRUE, labelsize = 1)
+
+summary(df_cbb.pca)
+```
+
+```{r}
+pca2 <- prcomp(df_cbb.sample, center = TRUE, scale = TRUE)
+summary(pca2)
+
+df_cluster <- as.data.frame(-pca2$x[, 1:2])
+df_cluster
+
+fviz_nbclust(df_cluster, kmeans, method = 'wss')
+fviz_nbclust(df_cluster, kmeans, method = 'silhouette')
+fviz_nbclust(df_cluster, kmeans, method = 'gap_stat')
+
+k <- 6
+df_cbb.kmeans = kmeans(df_cluster, centers = k, nstart = 50)
+fviz_cluster(df_cbb.kmeans, df_cluster, labelsize = 5, pointsize = 1, show.clust.cent = FALSE, repel = TRUE)
 ```
 
