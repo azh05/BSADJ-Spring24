@@ -273,7 +273,7 @@ df_busts |> pull(player)
 plot_good <- ggplot(df_good, aes(x = fg2_per_g, y = fg3_per_g)) +
   geom_point(color = "green", size = 4, alpha = 0.5) +
   geom_label_repel(data = df_good, aes(label = player), size = 1.5, max.overlaps = 20) +
-  labs(title = "CBB Shot Selection for Good NBA Lottery Picks", x = "2PT Field Goal Makes per game", y = "3PT Field Goal Makes per game") +
+  labs(title = "CBB Shot Selection for Good Value NBA Lottery Picks", x = "2PT Field Goal Makes per game", y = "3PT Field Goal Makes per game") +
   theme_bw()
 
 plot_busts <- ggplot(df_busts, aes(x = fg2_per_g, y = fg3_per_g, label = player)) +
@@ -401,8 +401,18 @@ fviz_nbclust(df_cluster, kmeans, method = 'wss')
 fviz_nbclust(df_cluster, kmeans, method = 'silhouette')
 fviz_nbclust(df_cluster, kmeans, method = 'gap_stat')
 
-k <- 6
+k <- 10
 df_cbb.kmeans = kmeans(df_cluster, centers = k, nstart = 50)
 fviz_cluster(df_cbb.kmeans, df_cluster, labelsize = 5, pointsize = 1, show.clust.cent = FALSE, repel = TRUE)
+```
+```{r}
+df_cbb.sample$group <- df_cbb.kmeans$cluster
+df_cbb.sample <- df_cbb.sample |> relocate(group, .before = dunk_made)
+head(df_cbb.sample)
+
+df_cbb.sample |> group_by(group) |>
+  summarize(across(everything(), mean))
+df_cbb.sample |> group_by(group) |>
+  summarize(across(everything(), median))
 ```
 
