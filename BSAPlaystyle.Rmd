@@ -133,11 +133,11 @@ is_bust <- function(pick_number, df_bottom_players = df_bottom_players, df2 = df
   
   rpg <- df_bottom_rb |> pull(trb_per_g)
   
-  df_top_vorp <- df2 |> 
+  df_bottom_vorp <- df2 |> 
     group_by(pick_overall) |>
-    summarize(vorp_per_g = median(vorp_per_g))
+    summarize(vorp_per_g = quantile(vorp_per_g, probs = 0.3))
   
-  vorppg <- df_top_vorp |> pull(vorp_per_g)
+  vorppg <- df_bottom_vorp |> pull(vorp_per_g)
   
   # playing less than half the seasons since drafted makes you a bust
   df <- df2 |> filter(pick_overall == pick_number) |>
@@ -261,11 +261,11 @@ df_busts <- bind_rows(df_pick_1_bust, df_pick_2_bust, df_pick_3_bust, df_pick_4_
 
 print(df_good, n = 20)
 df_good |> pull(player)
+good_list <- df_good |> pull(player)
 
-
-df_busts
 
 df_busts |> pull(player)
+bust_list <- df_busts |> pull(player)
 ```
 
 ``` {r}
@@ -288,7 +288,7 @@ plot_combined <- ggplot(df2, aes(x = fg2_per_g, y = fg3_per_g)) +
   geom_point(data = df_busts, aes(color = "Bad value"), size = 4, alpha = 0.5) +
   geom_point(data = df_good, aes(color = "Good value"), size = 4, alpha = 0.5) +
   labs(title = "CBB Shot Selection for NBA Lottery Picks", 
-       x = "2PT Field Goal Makes per game", y = "3PT Field Goal Makes per game") +
+       x = "2PT Field Goal Makes per game", y = "3PT Field Goal Makes per game", color = "Value") +
   scale_color_manual(values = c("Bad value" = "red", "Good value" = "green", "Average value" = "grey")) +
   theme_bw()
 
@@ -355,20 +355,11 @@ df_cbb_scaled
 # df_cbb_scaled <- df_cbb_scaled |> relocate(player, .before = dunk_made)
 
 corr_matrix <- cor(df_cbb_scaled)
+colnames(corr_matrix)
 ggcorrplot(corr_matrix, method = "square")
 ggcorrplot(corr_matrix, method = "square", hc.order = TRUE,
-           type = "lower")
+           type = "lower", tl.cex = 7, title = "Correlations between different college statistics")
 ```
-
-```{r}
-pca <- princomp(corr_matrix)
-summary(pca)
-
-fviz_eig(pca, addlabels = TRUE, title = "Principal Components Scree Plot")
-fviz_pca_var(pca, col.var = "cos2", repel = TRUE, title = "Contributions of Variables to Components 1 and 2", gradient.cols = c("lightblue", "black"))
-fviz_cos2(pca, choice = "var", axes = 1:2)
-```
-
 Guides:
 http://www.sthda.com/english/articles/31-principal-component-methods-in-r-practical-guide/112-pca-principal-component-analysis-essentials/
 
@@ -380,12 +371,14 @@ head(df_cbb.sample)
 
 df_cbb.pca <- PCA(df_cbb.sample |> select(-games), scale.unit = TRUE, graph = FALSE)
 
-fviz_eig(df_cbb.pca, addlabels = TRUE)
+fviz_eig(df_cbb.pca, addlabels = TRUE, main = "Statistics Represented in Lower Dimensional Components")
 fviz_pca_var(df_cbb.pca, col.var = "cos2", gradient.cols = c("lightblue", "black"), repel = TRUE)
 var <- get_pca_var(df_cbb.pca)
 
-fviz_cos2(df_cbb.pca, choice = "var", axes = 1:2)
-fviz_pca_ind(df_cbb.pca, repel = TRUE, labelsize = 1)
+fviz_cos2(df_cbb.pca, choice = "var", axes = 1:2) + 
+  labs(title = "Quality of Representation to PCA Dimensions 1 and 2")
+fviz_pca_ind(df_cbb.pca, repel = TRUE, labelsize = 1) +
+  labs(title = "NBA Lottery Picks on PCA Dimensions 1 and 2")
 
 summary(df_cbb.pca)
 ```
@@ -401,18 +394,166 @@ fviz_nbclust(df_cluster, kmeans, method = 'wss')
 fviz_nbclust(df_cluster, kmeans, method = 'silhouette')
 fviz_nbclust(df_cluster, kmeans, method = 'gap_stat')
 
-k <- 10
-df_cbb.kmeans = kmeans(df_cluster, centers = k, nstart = 50)
-fviz_cluster(df_cbb.kmeans, df_cluster, labelsize = 5, pointsize = 1, show.clust.cent = FALSE, repel = TRUE)
+k <- 15
+df_cbb.kmeans <- kmeans(df_cluster, centers = k, nstart = 50)
+df_cbb.kmeans2 <- kmeans(df_cluster, centers = 10, nstart = 50)
+df_cbb.kmeans3 <- kmeans(df_cluster, centers = 5, nstart = 50)
+
+df_cbb.kmeans
+fviz_cluster(df_cbb.kmeans, df_cluster, labelsize = 4, pointsize = 1, show.clust.cent = FALSE, repel = TRUE,
+             xlab = "Dimension 1", ylab = "Dimension 2", main = "Clustering with K-means") + scale_y_reverse()
+
+cluster_assignments <- df_cbb.kmeans$cluster
+cluster_df15 <- data.frame(value = cluster_assignments, name = names(cluster_assignments))
+
+cluster_assignments2 <- df_cbb.kmeans2$cluster
+cluster_df10 <- data.frame(value = cluster_assignments2, name = names(cluster_assignments2))
+
+cluster_assignments3 <- df_cbb.kmeans3$cluster
+cluster_df5 <- data.frame(value = cluster_assignments3, name = names(cluster_assignments3))
+
+cluster_df15 <- as.tibble(cluster_df15)
+cluster_df10 <- as.tibble(cluster_df10)
+cluster_df5 <- as.tibble(cluster_df5)
+
+cluster_df15 <- cluster_df15 |> rename(pc_cluster = value) |> 
+  relocate(pc_cluster, .after = name)
+cluster_df10 <- cluster_df10 |> rename(pc_cluster = value) |> 
+  relocate(pc_cluster, .after = name)
+cluster_df5 <- cluster_df5 |> rename(pc_cluster = value) |> 
+  relocate(pc_cluster, .after = name)
+
+cluster_df15
 ```
+
+
+
 ```{r}
 df_cbb.sample$group <- df_cbb.kmeans$cluster
 df_cbb.sample <- df_cbb.sample |> relocate(group, .before = dunk_made)
 head(df_cbb.sample)
 
 df_cbb.sample |> group_by(group) |>
-  summarize(across(everything(), mean))
+  summarize(across(everything(), mean)) |> print(n = 15, width = Inf)
 df_cbb.sample |> group_by(group) |>
   summarize(across(everything(), median))
 ```
+```{r}
+df_career_stats |> filter(player == "Jaylen Brown") |>
+  select(player, pick_overall, year, pts_per_g, trb_per_g, ast_per_g, vorp, g)
+
+df_career_stats |> filter(year >= 2010)|> 
+  group_by(pick_overall) |> 
+  summarize(across(everything(), function(x) mean(x))) |>
+  select(pick_overall, pts_per_g, trb_per_g, ast_per_g, vorp, g)
+```
+
+```{r}
+df_cluster2 <- df_cbb_scaled
+
+df_cluster2$name <- rownames(df_cbb)
+df_cluster2 <- df_cluster2 |> relocate(name, .before = dunk_made)
+
+df_cluster2 <- column_to_rownames(df_cluster2, var = "name")
+
+k1 <- 15
+k2 <- 10
+k3 <- 5
+
+k15 <- kmeans(df_cluster2, centers = k1, nstart = 50)
+k10 <-  kmeans(df_cluster2, centers = k2, nstart = 50)
+k5 <- kmeans(df_cluster2, centers = k3, nstart = 50)
+
+temp_assign <- k15$cluster
+
+combine <- function(df, kmeans) {
+  temp_assign <- kmeans$cluster
+  df_temp <- as.tibble(data.frame(value = temp_assign, name = names(temp_assign)))
+  if(!("all_cluster" %in% colnames(df_temp))) {
+    df_temp <- df_temp |> rename(all_cluster = value)
+  }
+  cluster_df <- left_join(df, df_temp, by = c("name"))
+  cluster_df <- cluster_df |> relocate(pc_cluster, .after = all_cluster)
+  # cluster_df <- cluster_df |> group_by(all_cluster, pc_cluster) |> summarize(n = n())
+  # return(cluster_df)
+  return(cluster_df)
+}
+
+groups15 <- combine(cluster_df15, k15) |> arrange(pc_cluster, all_cluster)
+groups10 <- combine(cluster_df10, k10)
+groups5 <- combine(cluster_df5, k5)
+
+groups15
+
+df_cbb <- df_cbb |> rownames_to_column(var = "name")
+df_groups <- left_join(df_cbb, groups15, by = c("name"))
+df_cbb <- df_cbb |> column_to_rownames(var = "name")
+```
+```{r}
+library(ggforce)
+```
+
+``` {r}
+df_groups <- df_groups |> 
+  mutate(bust = if_else(name %in% bust_list, 1, 0),
+         good = if_else(name %in% good_list, 1, 0))
+
+df_groups |> group_by(pc_cluster) |>
+  summarize(n = n(),
+            across(everything(), mean)) |> 
+  select(-name)
+
+df_groups |> group_by(all_cluster) |>
+  summarize(n = n(),
+            across(everything(), mean)) |> 
+  select(-name)
+
+df_pc <- left_join(df_cluster |> rownames_to_column("name"), groups15, by = "name")
+df_pc <- left_join(df_pc, df_groups |> select(name, bust, good), by = "name")
+
+df_pc <- df_pc |> column_to_rownames("name")
+df_pc <- df_pc |> 
+  mutate(
+    pc_cluster = as.factor(pc_cluster),
+    all_cluster = as.factor(all_cluster)
+  )
+
+hulls <- df_pc |>
+  group_by(pc_cluster) |>
+  slice(chull(PC1, PC2))
+
+p <- ggplot(data = df_pc, aes(x = PC1, y = PC2, color = pc_cluster)) + 
+  geom_polygon(data = hulls, 
+               aes(group = pc_cluster, color = pc_cluster, fill = pc_cluster), 
+               alpha = 0.2) +
+  geom_point(data = df_pc |> filter(bust == 1), size = 3, color = "black", shape = 10, show.legend = FALSE) + 
+  geom_point(data = df_pc |> filter(good == 1), size = 3, color = "black", shape = 5, show.legend = FALSE) +
+  geom_point() +
+  scale_y_reverse() + 
+  scale_y_reverse() +
+  theme_minimal() +
+  labs(title = "Clusters with Bad and Good Value players",
+       x = "Dimension 1",
+       y = "Dimension 2",
+       color = "Cluster",
+       fill = "Cluster"
+       )
+  
+
+p
+
+p2 <- p + 
+  geom_label_repel(data = df_pc |> rownames_to_column(var = "name") |> filter(bust == 1 | good == 1),
+                   aes(label = name),
+                   size = 1.6,
+                   max.overlaps = 20,
+                   fill = NA, 
+                   label.size = NA,
+                   segment.size = 0.2
+                   )
+
+p2
+
+```
+
 
