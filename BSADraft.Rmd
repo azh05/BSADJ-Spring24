@@ -217,3 +217,85 @@ plot2 <- plot +
 plot2
 ```
 
+```{r}
+k <- 35
+kmeans2 <- kmeans(df_combined.scaled, centers = k)
+clusters2 <- kmeans2$cluster
+
+clusters2 <- as.tibble(data.frame(value = clusters2, player = names(clusters2))) |>
+  rename(all_cluster = value) |>
+  relocate(player, .before = all_cluster)
+
+clusters2
+
+df_combined.pc2 <- left_join(df_combined.pc, clusters2, by = c("player"))
+df_combined.assignments2 <- left_join(df_combined.assignments, clusters2, by = c("player"))
+
+df_combined.assignments2
+
+df_combined.assignments2 <- df_combined.assignments2 |>
+  mutate(all_cluster = as.factor(all_cluster))
+
+df_combined.pc2 <- df_combined.pc2 |>
+  mutate(all_cluster = as.factor(all_cluster))
+
+df_combined.assignments2 
+```
+```{r}
+cluster_means <- df_combined.assignments2 |> 
+  group_by(all_cluster) |>
+  summarize(mean_prospect = mean(prospect, na.rm = TRUE))
+
+non_zero_clusters <- cluster_means |>
+  filter(mean_prospect > 0) |>
+  pull(all_cluster)
+
+df_combined.assignments2 <- df_combined.assignments2 |>
+  filter(all_cluster %in% non_zero_clusters)
+
+df_combined.pc2 <- df_combined.pc2 |>
+  filter(all_cluster %in% non_zero_clusters)
+
+
+df_combined.assignments2 |> group_by(all_cluster) |>
+  summarize(across(everything(), mean)) |> 
+  select(-player) |> print(n = 15, width = Inf)
+```
+
+```{r}
+hulls2 <- df_combined.pc2 |>
+  group_by(all_cluster) |>
+  slice(chull(Comp.1, Comp.2))
+
+df_combined.pc2
+
+plot <- ggplot(data = df_combined.pc2, aes(x = Comp.1, y = Comp.2, color = all_cluster)) + 
+  geom_polygon(data = hulls2, 
+               aes(group = all_cluster, color = all_cluster, fill = all_cluster), 
+               alpha = 0.2) +
+  geom_point() +
+  geom_point(data = df_combined.pc2 |> filter(bust == 1), size = 3, color = "black", shape = 10, show.legend = FALSE) + 
+  geom_point(data = df_combined.pc2 |> filter(good == 1), size = 3, color = "black", shape = 5, show.legend = FALSE) +
+  geom_point(data = df_combined.pc2 |> filter(prospect == 1), size = 3, color = "black", shape = 6, show.legend = FALSE) +
+  labs(title = "Clusters with Busts, Successes, and Prospects",
+       x = "Dimension 1",
+       y = "Dimension 2",
+       color = "Cluster",
+       fill = "Cluster"
+  )
+
+plot
+
+plot2 <- plot + 
+  geom_label_repel(data = df_combined.pc2 |> filter(bust == 1 | good == 1 | prospect == 1),
+                   aes(label = player),
+                   size = 1.6,
+                   max.overlaps = 20,
+                   fill = NA, 
+                   label.size = NA,
+                   segment.size = 0.2
+                   )
+
+plot2
+```
+
