@@ -75,6 +75,7 @@ df2 <- df2 |>
 
 df2 <-df2 |>
   mutate(across(c(dunk_made, dunk_attempts, rim_made, rim_attempts, other2pt_made, other2pt_attempts), as.numeric))
+
 ```
 
 ## defining bust metric
@@ -263,9 +264,14 @@ print(df_good, n = 20)
 df_good |> pull(player)
 good_list <- df_good |> pull(player)
 
+# write.csv(data.frame(good_list), "./data/goodplayers.csv")
 
 df_busts |> pull(player)
 bust_list <- df_busts |> pull(player)
+
+# write.csv(data.frame(bust_list), "./data/bustplayers.csv")
+
+str(bust_list)
 ```
 
 ``` {r}
@@ -369,7 +375,7 @@ https://medium.com/@zullinira23/implementation-of-principal-component-analysis-p
 df_cbb.sample <- df_cbb |> sample_frac(1, replace = FALSE)
 head(df_cbb.sample)
 
-df_cbb.pca <- PCA(df_cbb.sample |> select(-games), scale.unit = TRUE, graph = FALSE)
+df_cbb.pca <- PCA(df_cbb.sample |> select(-games, -fg3_pct_per_g), scale.unit = TRUE, graph = FALSE)
 
 fviz_eig(df_cbb.pca, addlabels = TRUE, main = "Statistics Represented in Lower Dimensional Components")
 fviz_pca_var(df_cbb.pca, col.var = "cos2", gradient.cols = c("lightblue", "black"), repel = TRUE)
@@ -493,20 +499,19 @@ df_cbb <- df_cbb |> column_to_rownames(var = "name")
 library(ggforce)
 ```
 
+
 ``` {r}
 df_groups <- df_groups |> 
   mutate(bust = if_else(name %in% bust_list, 1, 0),
          good = if_else(name %in% good_list, 1, 0))
 
-df_groups |> group_by(pc_cluster) |>
-  summarize(n = n(),
-            across(everything(), mean)) |> 
-  select(-name)
 
 df_groups |> group_by(all_cluster) |>
   summarize(n = n(),
-            across(everything(), mean)) |> 
-  select(-name)
+            across(everything(), mean),
+            ratio = good / bust) |> 
+  select(-name) |>
+  print(width = Inf)
 
 df_pc <- left_join(df_cluster |> rownames_to_column("name"), groups15, by = "name")
 df_pc <- left_join(df_pc, df_groups |> select(name, bust, good), by = "name")
@@ -519,20 +524,18 @@ df_pc <- df_pc |>
   )
 
 hulls <- df_pc |>
-  group_by(pc_cluster) |>
+  group_by(all_cluster) |>
   slice(chull(PC1, PC2))
 
-p <- ggplot(data = df_pc, aes(x = PC1, y = PC2, color = pc_cluster)) + 
+p <- ggplot(data = df_pc, aes(x = PC1, y = PC2, color = all_cluster)) + 
   geom_polygon(data = hulls, 
-               aes(group = pc_cluster, color = pc_cluster, fill = pc_cluster), 
+               aes(group = all_cluster, color = all_cluster, fill = all_cluster), 
                alpha = 0.2) +
+  geom_point() +
   geom_point(data = df_pc |> filter(bust == 1), size = 3, color = "black", shape = 10, show.legend = FALSE) + 
   geom_point(data = df_pc |> filter(good == 1), size = 3, color = "black", shape = 5, show.legend = FALSE) +
-  geom_point() +
-  scale_y_reverse() + 
-  scale_y_reverse() +
-  theme_minimal() +
-  labs(title = "Clusters with Bad and Good Value players",
+  scale_x_reverse() +
+  labs(title = "Clusters using higher dimensional data",
        x = "Dimension 1",
        y = "Dimension 2",
        color = "Cluster",
@@ -551,9 +554,51 @@ p2 <- p +
                    label.size = NA,
                    segment.size = 0.2
                    )
-
 p2
-
 ```
 
 
+``` {r}
+
+df_groups |> group_by(pc_cluster) |>
+  summarize(n = n(),
+            across(everything(), mean),
+            ratio = good / bust) |> 
+  select(-name) |>
+  print(width = Inf)
+
+hulls <- df_pc |>
+  group_by(pc_cluster) |>
+  slice(chull(PC1, PC2))
+
+p <- ggplot(data = df_pc, aes(x = PC1, y = PC2, color = pc_cluster)) + 
+  geom_polygon(data = hulls, 
+               aes(group = pc_cluster, color = pc_cluster, fill = pc_cluster), 
+               alpha = 0.2) +
+  geom_point() +
+  geom_point(data = df_pc |> filter(bust == 1), size = 3, color = "black", shape = 10, show.legend = FALSE) + 
+  geom_point(data = df_pc |> filter(good == 1), size = 3, color = "black", shape = 5, show.legend = FALSE) +
+  scale_y_reverse() +
+  labs(title = "Clusters with Busts and Successes",
+       x = "Dimension 1",
+       y = "Dimension 2",
+       color = "Cluster",
+       fill = "Cluster"
+  )
+
+p
+
+p2 <- p + 
+  geom_label_repel(data = df_pc |> rownames_to_column(var = "name") |> filter(bust == 1 | good == 1),
+                   aes(label = name),
+                   size = 1.6,
+                   max.overlaps = 20,
+                   fill = NA, 
+                   label.size = NA,
+                   segment.size = 0.2
+                   )
+
+p2
+
+
+```

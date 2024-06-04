@@ -1,0 +1,219 @@
+---
+title: "NCAA Prospects"
+output: html_document
+date: "2024-06-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(ggrepel)
+library(FactoMineR)
+library(factoextra)
+library(ggforce)
+```
+
+# Importing data
+```{r}
+df_ss <- read_csv("./data/combinedstatshot.csv")
+df_draft <- read_csv("./data/prospectcombined.csv")
+
+df_draft <- df_draft |> 
+  select(-`...1`, -`Unnamed: 0_x`, -`Unnamed: 0_y`, -school_name)
+
+good_list <- read_csv("./data/goodplayers.csv")
+good_list <- good_list |> pull(good_list)
+bust_list <- read_csv("./data/bustplayers.csv")
+bust_list <- bust_list |> pull(bust_list)
+```
+
+## Cleaning Data
+```{r}
+splitting <- function(df_draft) {
+  df_draft <- df_draft |> 
+    separate_wider_delim(dunk_tot, delim = "-", names = c("dunk_made", "dunk_attempts"))
+  
+  df_draft <- df_draft |>
+    separate_wider_delim(rim_tot, delim = "-", names = c("rim_made", "rim_attempts"))
+  
+  df_draft <- df_draft |>
+    separate_wider_delim(other2pt_tot, delim = "-", names = c("other2pt_made", "other2pt_attempts"))
+  
+  df_draft <- df_draft |>
+    mutate(across(c(dunk_made, dunk_attempts, rim_made, rim_attempts, other2pt_made, other2pt_attempts), as.numeric),
+           dunk_pct = parse_number(dunk_pct) / 100, 
+           rim_pct = parse_number(rim_pct) / 100,
+           rim_asted = parse_number(rim_asted) / 100,
+           other2pt_pct = parse_number(other2pt_pct) / 100,
+           other2pt_asted = parse_number(other2pt_asted) / 100,
+           fg3_asted = parse_number(`3pt_asted`) / 100,
+           fg3_pct_per_g = coalesce(fg3_per_g / fg3a_per_g, 0))
+  
+  return(df_draft)
+}
+
+df_draft <- splitting(df_draft)
+df_ss <- splitting(df_ss)
+```
+## Selecting Players
+
+```{r}
+prospects <- c("Donovan Clingan",
+               "Reed Sheppard",
+               "Stephon Castle",
+               "Rob Dillingham",
+               "Dalton Knecht",
+               "Cody Williams",
+               "Devin Carter",
+               "Ja'Kobe Walter",
+               "Jared McCain",
+               "Zach Edey",
+               "Tristan Da Silva",
+               "Johnny Furphy",
+               "Kyshawn George",
+               "Kyle Filipowski", 
+               "Isaiah Collier",
+               "Kel'el Ware",
+               "Carlton Carrington",
+               "Adem Bona",
+               "Yves Missi",
+               "Bronny James")
+
+df_prospects <- df_draft |> 
+  filter(player %in% prospects)
+
+df_prospects <- df_prospects |> 
+  select(player, dunk_made, dunk_attempts, dunk_pct, rim_made, rim_attempts, rim_pct, rim_asted,
+  other2pt_made, other2pt_attempts, other2pt_pct, other2pt_asted, fg2_pct, fg3_per_g, fg3a_per_g, 
+ fg3_asted, games, ft_per_g, fta_per_g, ast_per_g, orb_per_g, drb_per_g,
+  stl_per_g, blk_per_g, tov_per_g, pts_per_g)
+
+df_ss <- df_ss |>
+  select(player, dunk_made, dunk_attempts, dunk_pct, rim_made, rim_attempts, rim_pct, rim_asted,
+  other2pt_made, other2pt_attempts, other2pt_pct, other2pt_asted, fg2_pct, fg3_per_g, fg3a_per_g, 
+ fg3_asted, games, ft_per_g, fta_per_g, ast_per_g, orb_per_g, drb_per_g,
+  stl_per_g, blk_per_g, tov_per_g, pts_per_g)
+
+to_per_game <- function(x, games) {
+  x <- x / games
+  return(x)
+}
+
+df_ss <- df_ss |> 
+  mutate(across(c(dunk_made, dunk_attempts, rim_made, rim_attempts, other2pt_made, 
+                  other2pt_attempts), function(x) to_per_game(x, games)))
+
+df_prospects <- df_prospects |> 
+  mutate(across(c(dunk_made, dunk_attempts, rim_made, rim_attempts, other2pt_made, 
+                  other2pt_attempts), function(x) to_per_game(x, games)))
+
+df_ss
+df_prospects
+```
+
+```{r}
+df_combined <- rbind(df_ss, df_prospects)
+df_combined
+```
+
+# PCA
+```{r}
+df_combined.scaled <- as_tibble(scale(df_combined |> select(-games, -player)))
+
+df_combined.scaled$player = df_combined$player
+df_combined.scaled <- column_to_rownames(df_combined.scaled, "player")
+df_combined.scaled
+
+pca_combined <- princomp(df_combined.scaled)
+summary(pca_combined)
+```
+```{r}
+k <- 15
+
+df_comp_values <- as.data.frame(pca_combined$scores[, 1:2])
+df_comp_values <- rownames_to_column(df_comp_values, "player")
+df_comp_values <- as.tibble(df_comp_values)
+df_combined.pc <- df_comp_values
+df_comp_values <- column_to_rownames(df_comp_values, "player")
+
+df_combined.pc
+
+kmeans <- kmeans(df_comp_values, centers = k)
+fviz_cluster(kmeans, df_comp_values, labelsize = 4, pointsize = 1, 
+             show.clust.cent = FALSE, repel = TRUE, main = "Cluster Plot with Draft Prospects") +
+  labs(x = "Dimension 1",
+       y = "Dimension 2")
+
+fviz_cluster(kmeans, df_comp_values, labelsize = 0, pointsize = 1, 
+             show.clust.cent = FALSE, main = "Cluster Plot with Draft Prospects") +
+  labs(x = "Dimension 1",
+       y = "Dimension 2")
+```
+
+```{r}
+clusters <- kmeans$cluster
+clusters <- as.tibble(data.frame(value = clusters, player = names(clusters))) |>
+  rename(pc_cluster = value) |>
+  relocate(player, .before = pc_cluster)
+
+df_combined.pc <- df_combined.pc |> left_join(clusters, by = c("player"))
+df_combined.pc <- df_combined.pc |>
+  mutate(bust = if_else(player %in% bust_list, 1, 0),
+         good = if_else(player %in% good_list, 1, 0),
+         prospect = if_else(player %in% prospects, 1, 0))
+
+df_combined.assignments <- left_join(df_combined, clusters, by = c("player"))
+
+df_combined.assignments <- df_combined.assignments |>
+  mutate(bust = if_else(player %in% bust_list, 1, 0),
+         good = if_else(player %in% good_list, 1, 0),
+         prospect = if_else(player %in% prospects, 1, 0))
+
+df_combined.assignments |> group_by(pc_cluster) |>
+  summarize(across(everything(), mean)) |> 
+  select(-player) |> print(n = 15, width = Inf)
+
+df_combined.assignments <- df_combined.assignments |>
+  mutate(pc_cluster = as.factor(pc_cluster))
+
+df_combined.pc <- df_combined.pc |>
+  mutate(pc_cluster = as.factor(pc_cluster))
+```
+
+
+``` {r}
+hulls <- df_combined.pc |>
+  group_by(pc_cluster) |>
+  slice(chull(Comp.1, Comp.2))
+
+plot <- ggplot(data = df_combined.pc, aes(x = Comp.1, y = Comp.2, color = pc_cluster)) + 
+  geom_polygon(data = hulls, 
+               aes(group = pc_cluster, color = pc_cluster, fill = pc_cluster), 
+               alpha = 0.2) +
+  geom_point() +
+  geom_point(data = df_combined.pc |> filter(bust == 1), size = 3, color = "black", shape = 10, show.legend = FALSE) + 
+  geom_point(data = df_combined.pc |> filter(good == 1), size = 3, color = "black", shape = 5, show.legend = FALSE) +
+  geom_point(data = df_combined.pc |> filter(prospect == 1), size = 3, color = "black", shape = 6, show.legend = FALSE) +
+  labs(title = "Clusters with Busts, Successes, and Prospects",
+       x = "Dimension 1",
+       y = "Dimension 2",
+       color = "Cluster",
+       fill = "Cluster"
+  )
+
+plot
+
+plot2 <- plot + 
+  geom_label_repel(data = df_combined.pc |> filter(bust == 1 | good == 1 | prospect == 1),
+                   aes(label = player),
+                   size = 1.6,
+                   max.overlaps = 20,
+                   fill = NA, 
+                   label.size = NA,
+                   segment.size = 0.2
+                   )
+
+plot2
+```
+
